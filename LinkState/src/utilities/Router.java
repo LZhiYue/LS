@@ -4,6 +4,8 @@ import java.awt.List;
 import java.io.*;
 import java.net.*;
 import java.util.ArrayList;
+import java.util.ConcurrentModificationException;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -17,6 +19,8 @@ public class Router {
 	public RouterId routerId;
 	public LinkedHashMap<RouterId, Map<RouterId, Integer>> routingTable;
 	public LinkedHashMap<RouterId, Integer> routingTableVersion;
+	public LinkedHashMap<RouterId, Date> routingTableDate;
+	
 	public int seq = 0;
 	public Graph graph;
 	public ArrayList<Vertex> vertexs;
@@ -31,6 +35,7 @@ public class Router {
 
 		routingTable = new LinkedHashMap<RouterId, Map<RouterId, Integer>>();
 		routingTableVersion = new LinkedHashMap<RouterId, Integer>();
+		routingTableDate = new LinkedHashMap<RouterId, Date>();
 		routerId = new RouterId(InetAddress.getLocalHost(), serverPort);
 		System.out.println(InetAddress.getLocalHost().getHostAddress());
 	}
@@ -54,6 +59,7 @@ public class Router {
 			}
 		}
 		routingTableVersion.put(routerId, this.seq);
+		routingTableDate.put(routerId, new Date(System.currentTimeMillis()));
 	}
 	
 	public void quit() {
@@ -72,6 +78,8 @@ public class Router {
 			// convey the table
 			sendTable(in.address.getHostAddress(), in.port, tableOwner);
 		}
+		// update the send time or receive time
+		routingTableDate.put(tableOwner, new Date(System.currentTimeMillis()));
 	}
 	
 	public void calculate() {
@@ -135,6 +143,38 @@ public class Router {
 			map.put(m.getRouterId(), weight);
 			routingTable.put(routerId, map);
 			conveyRoutingTableToNeighbors(routerId);
+		}
+	}
+	
+	public void disconnect(RouterId tableOwner) {
+		Map<RouterId, Integer> map = routingTable.get(tableOwner);
+		for (RouterId in : map.keySet()) {
+			map.put(in, Integer.MAX_VALUE);
+		}
+		Set<RouterId> neighors = routingTable.get(routerId).keySet();
+		if (neighors.contains(tableOwner)) {
+			Map<RouterId, Integer> map2 = routingTable.get(routerId);
+			map2.put(tableOwner, Integer.MAX_VALUE);
+		}
+		calculate();
+	}
+	
+	public void updateAndCheckNeighbors() {
+		for (RouterId in : routingTableDate.keySet()) {
+			Date oldDate = routingTableDate.get(in);
+			Date now = new Date(System.currentTimeMillis());
+			long seconds = (now.getTime() - oldDate.getTime()) / 1000;
+			if (in.toString().equals(routerId.toString())) {
+				if (seconds >= 60) {
+					// transfer the table again
+					conveyRoutingTableToNeighbors(routerId);
+				}
+			} else { 
+				if (seconds >= 150) {
+					System.out.println("Time out");
+					disconnect(in);
+				}
+			}
 		}
 	}
 
@@ -222,6 +262,7 @@ public class Router {
 						e.printStackTrace();
 					}
 				}
+				updateAndCheckNeighbors();
 			}
 		}
 	}
@@ -295,28 +336,6 @@ public class Router {
 	}
 	
 	public void test() {
-		try {
-			routingTableVersion.put(new RouterId(InetAddress.getLocalHost(), 6666), 3);
-			routingTableVersion.put(new RouterId(InetAddress.getLocalHost(), 6667), 3);
-			
-			routingTableVersion.put(new RouterId(InetAddress.getLocalHost(), 6668), 3);
-			/*
-			routingTableVersion.put(new RouterId(InetAddress.getLocalHost(), 6666), 3);
-			routingTableVersion.put(new RouterId(InetAddress.getLocalHost(), 6666), 3);
-			*/
-			if (routingTableVersion.containsKey(new RouterId(InetAddress.getLocalHost(), 6666))) {
-				System.out.println("ok");
-			} else {
-				System.out.println("bb");
-			}
-		}
-		catch (Exception e) {
-			e.printStackTrace();
-		}
-		System.out.println(routingTableVersion.size());
-		for (RouterId in : routingTableVersion.keySet()) {
-			System.out.println(in + " " + routingTableVersion.get(in));
-		}
 	}
 
 	public static void main(String[] args) {
